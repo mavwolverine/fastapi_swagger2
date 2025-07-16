@@ -229,6 +229,8 @@ def get_swagger2_operation_parameters(
     schema_generator: GenerateJsonSchema,
     model_name_map: ModelNameMap,
     field_mapping: FieldMapping,
+    route: routing.APIRoute,
+    method: str,
 ) -> List[Dict[str, Any]]:
     parameters = []
     for param in all_route_params:
@@ -251,7 +253,26 @@ def get_swagger2_operation_parameters(
         if field_info.in_.value == "body":
             parameter["schema"] = schema
         else:
-            parameter.update({k: v for (k, v) in schema.items() if k != "title"})
+            # according to the https://swagger.io/specification/v2/#:~:text=If%20in%20is%20any%20value%20other%20than%20%22body%22%3A
+            # field "type" if required
+            parameter["type"] = schema.get("type", "string") # fallback
+            if "anyOf" in schema:
+                any_of = schema.pop("anyOf")
+                if {"type": "null"} in any_of:
+                    parameter.update({"x-nullable": True, "required": False})
+                    any_of.remove({"type": "null"})
+                if len(any_of) == 1:
+                    parameter.update(any_of[0])
+                else:
+                    parameter.update({"type": "string"})
+                    logger.warning(
+                        f"fastapi_swagger2: Unable to handle anyOf in parameters {any_of}, use string type. Route: {route.path_format}, Method: {method}, Param: {param.alias}"
+                    )
+
+
+            parameter.update(
+                {k: v for (k, v) in schema.items() if k not in ["title", "anyOf"]}
+            )
         if field_info.description:
             parameter["description"] = field_info.description
         if field_info.example != Undefined:
@@ -341,6 +362,8 @@ def get_swagger2_path(
                 schema_generator=schema_generator,
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
+                route=route,
+                method=method,
             )
             parameters.extend(operation_parameters)
             if parameters:
@@ -571,7 +594,7 @@ def get_swagger2(
             for p in properties:
                 if "anyOf" in properties[p].keys():
                     any_of = properties[p].pop("anyOf")
-                    if len(any_of) <= 2:
+                    if len(any_of) <= 2 and {"type": "null"} in any_of:
                         for _any_of in any_of:
                             if _any_of == {"type": "null"}:
                                 properties[p]["x-nullable"] = True
