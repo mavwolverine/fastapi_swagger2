@@ -4,6 +4,6 @@ set -e
 set -x
 
 mypy src/fastapi_swagger2
-ruff src/fastapi_swagger2 tests scripts
+ruff check src/fastapi_swagger2 tests scripts
 black src/fastapi_swagger2 tests --check
 isort src/fastapi_swagger2 tests scripts --check-only
