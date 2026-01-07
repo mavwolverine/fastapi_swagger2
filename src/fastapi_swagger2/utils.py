@@ -54,7 +54,6 @@ else:
     ) -> Dict[str, Any]:
         definitions: Dict[str, Dict[str, Any]] = {}
         for model in flat_models:
-            print(REF_PREFIX)
             m_schema, m_definitions, m_nested_models = model_process_schema(
                 model, model_name_map=model_name_map, ref_prefix=REF_PREFIX
             )
@@ -249,7 +248,10 @@ def get_swagger2_operation_parameters(
         }
         schema: Dict[str, Any] = param_schema
         if field_info.in_.value == "body":
-            parameter["schema"] = schema
+            if "$ref" in schema:
+                parameter["schema"] = {"$ref", schema["$ref"]}
+            else:
+                parameter["schema"] = schema
         else:
             parameter.update({k: v for (k, v) in schema.items() if k != "title"})
         if field_info.description:
@@ -287,7 +289,14 @@ def get_swagger2_operation_request_body(
     if required:
         request_body_oai["required"] = required
 
-    request_media_content: Dict[str, Any] = {"schema": body_schema}
+    request_media_content: Dict[str, Any] = {}
+    if "$ref" in body_schema:
+        request_media_content["schema"] = {"$ref": body_schema["$ref"]}
+        request_media_content.update(
+            {k: v for (k, v) in body_schema.items() if k != "$ref"}
+        )
+    else:
+        request_media_content["schema"] = body_schema
     if field_info.example != Undefined:
         request_media_content["example"] = jsonable_encoder(field_info.example)
     # request_body_oai["content"] = {request_media_type: request_media_content}
@@ -342,6 +351,7 @@ def get_swagger2_path(
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
             )
+
             parameters.extend(operation_parameters)
             if parameters:
                 all_parameters = {
@@ -550,6 +560,14 @@ def get_swagger2(
             if result:
                 path, security_schemes, path_definitions = result
 
+                for k, v in path.items():
+                    for param in v["parameters"]:
+                        if "$ref" in param and "in" in param and param["in"] != "body":
+                            definition = definitions[param.pop("$ref").split("/")[2]]
+                            param.update(
+                                {k: v for (k, v) in definition.items() if k != "title"}
+                            )
+
                 if path:
                     paths.setdefault(route.path_format, {}).update(path)
 
@@ -569,16 +587,33 @@ def get_swagger2(
         for k in sorted(definitions):
             properties = definitions[k].get("properties", [])
             for p in properties:
-                if "anyOf" in properties[p].keys():
+                if "anyOf" in properties[p]:
                     any_of = properties[p].pop("anyOf")
-                    if len(any_of) <= 2:
-                        for _any_of in any_of:
-                            if _any_of == {"type": "null"}:
-                                properties[p]["x-nullable"] = True
+
+                    if len(any_of) == 1:
+                        # Single item - just use it directly
+                        properties[p].update(any_of[0])
+                    elif len(any_of) == 2:
+                        # Handle the 2-item case (type + null)
+                        ref_item = None
+                        has_null = False
+
+                        for item in any_of:
+                            if item == {"type": "null"}:
+                                has_null = True
+                            elif "$ref" in item:
+                                ref_item = item
                             else:
-                                properties[p].update(_any_of)
+                                properties[p].update(item)
+
+                        if ref_item and has_null:
+                            properties[p]["allOf"] = [ref_item]
+                            properties[p]["x-nullable"] = True
+                        elif has_null:
+                            properties[p]["x-nullable"] = True
                     else:
-                        properties[p].update({"type": "string"})
+                        # Fallback for complex anyOf cases (len > 2) or empty (len == 0)
+                        properties[p]["type"] = "string"
                         logger.warning(
                             f"fastapi_swagger2: Unable to handle anyOf in definitions {any_of}, defaulting to string type."
                         )

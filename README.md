@@ -26,7 +26,7 @@ Python 3.9+
 * 0.0.3 - FastAPI >= 0.79.0, <= 0.98.0
 * 0.1.1 - FastAPI >= 0.99.0, <= 0.99.1
 * 0.2.4 - FastAPI >= 0.100.0
-* 0.2.5 - FastAPI >= 0.100.0 + Pydantic v1/v2
+* 0.2.6 - FastAPI >= 0.100.0, < 0.199.0 > + Pydantic v1/v2
 
 ## Installation
 
