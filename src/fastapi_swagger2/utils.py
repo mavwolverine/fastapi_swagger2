@@ -9,7 +9,6 @@ from fastapi._compat import (
     PYDANTIC_V2,
     GenerateJsonSchema,
     JsonSchemaValue,
-    ModelField,
     Undefined,
     get_compat_model_name_map,
     lenient_issubclass,
@@ -39,8 +38,11 @@ from fastapi_swagger2.constants import REF_PREFIX, REF_TEMPLATE
 from fastapi_swagger2.models import Swagger2
 
 if PYDANTIC_V2:
-    from fastapi._compat import get_definitions, get_schema_from_model_field
+    from fastapi._compat import ModelField, get_definitions, get_schema_from_model_field
 else:
+    from pydantic.fields import (  # type: ignore[attr-defined,no-redef,assignment,unused-ignore]
+        ModelField,
+    )
     from pydantic.schema import (
         field_schema,
         get_flat_models_from_fields,
@@ -76,7 +78,7 @@ else:
         ],
         Dict[str, Dict[str, Any]],
     ]:
-        models = get_flat_models_from_fields(fields, known_models=set())
+        models = get_flat_models_from_fields(fields, known_models=set())  # type: ignore[arg-type,unused-ignore]
         return {}, get_model_definitions(
             flat_models=models, model_name_map=model_name_map
         )
@@ -92,8 +94,8 @@ else:
         separate_input_output_schemas: bool = True,
     ) -> Dict[str, Any]:
         # This expects that GenerateJsonSchema was already used to generate the definitions
-        return field_schema(  # type: ignore[no-any-return]
-            field, model_name_map=model_name_map, ref_prefix=REF_PREFIX
+        return field_schema(  # type: ignore[no-any-return,unused-ignore]
+            field, model_name_map=model_name_map, ref_prefix=REF_PREFIX  # type: ignore[arg-type,unused-ignore]
         )[0]
 
 
@@ -562,11 +564,56 @@ def get_swagger2(
 
                 for k, v in path.items():
                     for param in v["parameters"]:
-                        if "$ref" in param and "in" in param and param["in"] != "body":
-                            definition = definitions[param.pop("$ref").split("/")[2]]
-                            param.update(
-                                {k: v for (k, v) in definition.items() if k != "title"}
-                            )
+                        if PYDANTIC_V2:
+                            if "$ref" in param and param.get("in") != "body":
+                                definition = definitions[
+                                    param.pop("$ref").split("/")[2]
+                                ]
+                                param.update(
+                                    {
+                                        k: v
+                                        for (k, v) in definition.items()
+                                        if k != "title"
+                                    }
+                                )
+                        else:
+                            if "allOf" in param:
+                                all_of = param.pop("allOf")
+                                if len(all_of) > 1:
+                                    logger.warning(
+                                        f"fastapi_swagger2: Unable to handle allOf in path params {all_of}, using the first one."
+                                    )
+
+                                if len(all_of) > 0:
+                                    definition = definitions[
+                                        all_of[0]["$ref"].split("/")[2]
+                                    ]
+                                    param.update(
+                                        {
+                                            k: v
+                                            for (k, v) in definition.items()
+                                            if k != "title"
+                                        }
+                                    )
+                            if param.get("in") == "body" and "allOf" in param.get(
+                                "schema", {}
+                            ):
+                                schema = param.pop("schema")
+                                all_of = schema.pop("allOf")
+                                if len(all_of) > 1:
+                                    logger.warning(
+                                        f"fastapi_swagger2: Unable to handle allOf in path params {all_of}, using the first one."
+                                    )
+
+                                if len(all_of) > 0:
+                                    param["schema"] = {"$ref": all_of[0]["$ref"]}
+                                    param.update(
+                                        {
+                                            k: v
+                                            for (k, v) in schema.items()
+                                            if k != "title"
+                                        }
+                                    )
 
                 if path:
                     paths.setdefault(route.path_format, {}).update(path)
