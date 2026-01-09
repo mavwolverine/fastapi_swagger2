@@ -39,7 +39,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "fastapi >=0.100.0,<0.119.0",
+    "fastapi >=0.119.0,<=0.123.8",
 ]
 dynamic = ["version"]
 
@@ -73,6 +73,9 @@ known_third_party = ["fastapi", "pydantic", "starlette"]
 
 [tool.mypy]
 strict = true
+
+[tool.black]
+line-length = 119
 
 [tool.ruff.lint]
 select = [

@@ -1,103 +1,41 @@
 import http.client
 import inspect
-from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, cast
-from urllib.parse import ParseResult, urlparse
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
 
 from fastapi import routing
 from fastapi._compat import (
-    PYDANTIC_V2,
-    GenerateJsonSchema,
     JsonSchemaValue,
-    Undefined,
+    ModelField,
     get_compat_model_name_map,
+    get_definitions,
+    get_schema_from_model_field,
     lenient_issubclass,
 )
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.dependencies.models import Dependant
-from fastapi.dependencies.utils import get_flat_dependant, get_flat_params
+from fastapi.dependencies.utils import (
+    get_flat_dependant,
+    get_flat_params,
+)
 from fastapi.encoders import jsonable_encoder
 from fastapi.logger import logger
 from fastapi.openapi.constants import METHODS_WITH_BODY
 from fastapi.openapi.utils import (
+    _get_openapi_operation_parameters,
     get_fields_from_routes,
     get_openapi_operation_metadata,
+    get_openapi_operation_request_body,
     status_code_ranges,
+    validation_error_response_definition,
 )
-from fastapi.params import Body, Param
 from fastapi.responses import Response
 from fastapi.types import ModelNameMap
 from fastapi.utils import deep_dict_update, is_body_allowed_for_status_code
-from pydantic import BaseModel
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
-from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
 from typing_extensions import Literal
 
-from fastapi_swagger2.constants import REF_PREFIX, REF_TEMPLATE
-from fastapi_swagger2.models import Swagger2
-
-if PYDANTIC_V2:
-    from fastapi._compat import ModelField, get_definitions, get_schema_from_model_field
-else:
-    from pydantic.fields import (  # type: ignore[attr-defined,no-redef,assignment,unused-ignore]
-        ModelField,
-    )
-    from pydantic.schema import (
-        field_schema,
-        get_flat_models_from_fields,
-        model_process_schema,
-    )
-
-    def get_model_definitions(
-        *,
-        flat_models: Set[Union[Type[BaseModel], Type[Enum]]],
-        model_name_map: Dict[Union[Type[BaseModel], Type[Enum]], str],
-    ) -> Dict[str, Any]:
-        definitions: Dict[str, Dict[str, Any]] = {}
-        for model in flat_models:
-            m_schema, m_definitions, m_nested_models = model_process_schema(
-                model, model_name_map=model_name_map, ref_prefix=REF_PREFIX
-            )
-            definitions.update(m_definitions)
-            model_name = model_name_map[model]
-            if "description" in m_schema:
-                m_schema["description"] = m_schema["description"].split("\f")[0]
-            definitions[model_name] = m_schema
-        return definitions
-
-    def get_definitions(
-        *,
-        fields: List[ModelField],
-        schema_generator: GenerateJsonSchema,
-        model_name_map: ModelNameMap,
-        separate_input_output_schemas: bool = True,
-    ) -> Tuple[
-        Dict[
-            Tuple[ModelField, Literal["validation", "serialization"]], JsonSchemaValue
-        ],
-        Dict[str, Dict[str, Any]],
-    ]:
-        models = get_flat_models_from_fields(fields, known_models=set())  # type: ignore[arg-type,unused-ignore]
-        return {}, get_model_definitions(
-            flat_models=models, model_name_map=model_name_map
-        )
-
-    def get_schema_from_model_field(
-        *,
-        field: ModelField,
-        schema_generator: GenerateJsonSchema,
-        model_name_map: ModelNameMap,
-        field_mapping: Dict[
-            Tuple[ModelField, Literal["validation", "serialization"]], JsonSchemaValue
-        ],
-        separate_input_output_schemas: bool = True,
-    ) -> Dict[str, Any]:
-        # This expects that GenerateJsonSchema was already used to generate the definitions
-        return field_schema(  # type: ignore[no-any-return,unused-ignore]
-            field, model_name_map=model_name_map, ref_prefix=REF_PREFIX  # type: ignore[arg-type,unused-ignore]
-        )[0]
-
+from .models import Swagger2
 
 validation_error_definition = {
     "title": "ValidationError",
@@ -106,7 +44,7 @@ validation_error_definition = {
         "loc": {
             "title": "Location",
             "type": "array",
-            "items": {"type": "string"},
+            "items": {"type": "string", "description": "Location path (string or integer)"},
         },
         "msg": {"title": "Message", "type": "string"},
         "type": {"title": "Error Type", "type": "string"},
@@ -114,205 +52,218 @@ validation_error_definition = {
     "required": ["loc", "msg", "type"],
 }
 
-validation_error_response_definition = {
-    "title": "HTTPValidationError",
-    "type": "object",
-    "properties": {
-        "detail": {
-            "title": "Detail",
-            "type": "array",
-            "items": {"$ref": REF_PREFIX + "ValidationError"},
-        }
-    },
-}
 
-FieldMapping = Dict[
-    Tuple[ModelField, Literal["validation", "serialization"]], JsonSchemaValue
-]
+def _process_definitions_properties(definition: Dict[str, Any]) -> Dict[str, Any]:
+    properties = definition.get("properties", [])
+    for p in properties:
+        if "anyOf" not in properties[p]:
+            continue
+
+        any_of = properties[p].pop("anyOf")
+
+        if not any_of:  # Handle empty case first
+            properties[p]["type"] = "string"
+            logger.warning("fastapi_swagger2: Empty anyOf in definitions, defaulting to string type.")
+            continue
+
+        if len(any_of) == 1:
+            # Single item - just use it directly
+            properties[p].update(any_of[0])
+            continue
+
+        if len(any_of) == 2:
+            # Handle the 2-item case (type + null)
+            null_item = {"type": "null"}
+            if null_item in any_of:
+                other_item = any_of[0] if any_of[1] == null_item else any_of[1]
+
+                if "$ref" in other_item:
+                    properties[p]["allOf"] = [other_item]
+                else:
+                    properties[p].update(other_item)
+
+                properties[p]["x-nullable"] = True
+                continue
+
+        # Fallback for complex anyOf cases (len > 2)
+        properties[p]["type"] = "string"
+        logger.warning(f"fastapi_swagger2: Unable to handle anyOf in definitions {any_of}, defaulting to string type.")
+
+    return definition
 
 
-# def get_schema_from_model_field(
-#        *,
-#        field: ModelField,
-#        schema_generator: GenerateJsonSchema,
-#        model_name_map: ModelNameMap,
-#        field_mapping: FieldMapping,
-#    ) -> Dict[str, Any]:
-#        # This expects that GenerateJsonSchema was already used to generate the definitions
-#        json_schema = field_mapping[(field, field.mode)]
-#        if "$ref" not in json_schema:
-#            # TODO remove when deprecating Pydantic v1
-#            # Ref: https://github.com/pydantic/pydantic/blob/d61792cc42c80b13b23e3ffa74bc37ec7c77f7d1/pydantic/schema.py#L207
-#            json_schema[
-#                "title"
-#            ] = field.field_info.title or field.alias.title().replace("_", " ")
-#        return json_schema
+def _convert_refs_to_swagger2(obj: Any) -> Any:
+    """Recursively convert all $ref from OpenAPI 3.0 to Swagger 2.0 format"""
+    if isinstance(obj, dict):
+        result = {}
+        for k, v in obj.items():
+            if k == "$ref" and isinstance(v, str):
+                # Convert #/components/schemas/Model to #/definitions/Model
+                result[k] = v.replace("#/components/schemas/", "#/definitions/")
+            else:
+                result[k] = _convert_refs_to_swagger2(v)
+        return result
+    elif isinstance(obj, list):
+        return [_convert_refs_to_swagger2(item) for item in obj]
+    else:
+        return obj
+
+
+def _resolve_parameter_refs(output: Dict[str, Any], definitions: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve $ref in parameters by inlining the referenced schema properties"""
+    if "paths" in output:
+        for path_data in output["paths"].values():
+            for operation in path_data.values():
+                if isinstance(operation, dict) and "parameters" in operation:
+                    for param in operation["parameters"]:
+                        if param.get("in") == "body":
+                            continue
+
+                        ref_name = None
+
+                        # Handle direct $ref (Pydantic v2)
+                        if "$ref" in param:
+                            ref_name = param.pop("$ref").split("/")[-1]
+
+                        # Handle allOf with $ref (Pydantic v1)
+                        elif "allOf" in param:
+                            all_of = param.pop("allOf")
+                            if all_of and "$ref" in all_of[0]:
+                                ref_name = all_of[0]["$ref"].split("/")[-1]
+
+                        # Apply the resolved definition
+                        if ref_name and ref_name in definitions:
+                            definition = definitions[ref_name]
+                            param.update({k: v for k, v in definition.items() if k != "title"})
+
+    return output
+
+
+def _map_oauth2_flow(flow_key: str, flow: Dict[str, Any]) -> Dict[str, Any]:
+    security_definition = {
+        "type": "oauth2",
+        "flow": flow_key,
+        "scopes": flow["scopes"],
+    }
+
+    security_definition.update({k: v for k, v in flow.items() if k in ["authorizationUrl", "tokenUrl"]})
+
+    return security_definition
+
+
+def _flatten_parameter_schemas(parameters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert OpenAPI 3.0 parameter format to Swagger 2.0 format"""
+    for param in parameters:
+        if "schema" in param and param.get("in") != "body":
+            schema = param.pop("schema")
+            param.update({k: v for k, v in schema.items() if k != "title"})
+
+    return parameters
+
+
+def _flatten_headers_schema(process_response: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten OpenAPI 3.0 header schema to Swagger 2.0 format"""
+    if "headers" in process_response:
+        for header_info in process_response["headers"].values():
+            schema = header_info.pop("schema", None)
+            if schema:
+                header_info.update(schema)
+
+    return process_response
+
+
+def _convert_request_body_to_body_param(request_body: Dict[str, Any], body_field: ModelField) -> Dict[str, Any]:
+    """Convert OpenAPI 3.0 requestBody to Swagger 2.0 body parameter"""
+    # Extract schema from content
+    content = request_body["content"]
+    media_type = next(iter(content.keys()))  # Get first media type
+    schema = content[media_type]["schema"]
+
+    body_param = {
+        "name": body_field.alias,
+        "in": "body",
+        "required": request_body.get("required", False),
+    }
+
+    if "$ref" in schema:
+        body_param["schema"] = {"$ref": schema["$ref"]}
+        body_param.update({k: v for (k, v) in schema.items() if k != "$ref"})
+    else:
+        body_param["schema"] = schema
+
+    # Add example if present
+    if "example" in content[media_type]:
+        body_param["example"] = content[media_type]["example"]
+
+    return body_param
 
 
 def get_swagger2_security_definitions(
     flat_dependant: Dependant,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    def _map_oauth2_flow(flow_key: str, flow: Dict[str, Any]) -> Dict[str, Any]:
-        security_definition = {
-            "type": "oauth2",
-            "flow": flow_key,
-            "scopes": flow["scopes"],
-        }
-        if "authorizationUrl" in flow:
-            security_definition.update({"authorizationUrl": flow["authorizationUrl"]})
-        if "tokenUrl" in flow:
-            security_definition.update({"tokenUrl": flow["tokenUrl"]})
-
-        return security_definition
-
     oauth2_flows_keys_map = {
         "implicit": "implicit",
         "password": "password",
         "clientCredentials": "application",
         "authorizationCode": "accessCode",
     }
+
     security_definitions = {}
     operation_security = []
     for security_requirement in flat_dependant.security_requirements:
-        skip: bool = False
-        # fastapi.security.* which gets model from fastapi.openapi.models
         security_definition = jsonable_encoder(
             security_requirement.security_scheme.model,
             by_alias=True,
             exclude_none=True,
         )
-        if security_definition["type"] == "http":
+
+        # swagger2 logic - start
+        if security_definition["type"] == "apiKey":
+            ...
+        elif security_definition["type"] == "http":
             if security_definition.get("scheme", "basic") == "basic":
                 security_definition = {"type": "basic"}
+            elif security_definition.get("scheme") == "bearer":
+                security_definition = {"type": "apiKey", "name": "Authorization", "in": "header"}
             else:
-                skip = True
-                logger.warning(
-                    f"fastapi_swagger2: Unable to handle security_definition: {security_definition}"
-                )
-        elif security_definition["type"] == "apiKey":
-            pass
+                logger.warning(f"fastapi_swagger2: Unable to handle security_definition: {security_definition}")
+                continue
         elif security_definition["type"] == "oauth2":
             flows = security_definition["flows"]
-            flows_keys = list(flows.keys())
-            if len(flows_keys) >= 1:
-                flow_key_3 = flows_keys[0]
-                flow = flows[flow_key_3]
-                security_definition = _map_oauth2_flow(
-                    oauth2_flows_keys_map[flow_key_3], flow
-                )
 
-                for i in range(1, len(flows_keys)):
-                    flow_key_3 = flows_keys[i]
-                    flow = flows[flow_key_3]
-                    flow_key_2 = oauth2_flows_keys_map[flow_key_3]
-                    security_definition_1 = _map_oauth2_flow(flow_key_2, flow)
-                    security_name = security_requirement.security_scheme.scheme_name
-                    _security_name = security_name + "_" + flow_key_2
-                    security_definitions[_security_name] = security_definition_1
-                    operation_security.append(
-                        {_security_name: security_requirement.scopes}
-                    )
-        else:
-            skip = True
-            logger.warning(
-                f"fastapi_swagger2: Unable to handle security_definition: {security_definition}"
-            )
-        if not skip:
+            if not flows:
+                continue
+
             security_name = security_requirement.security_scheme.scheme_name
-            security_definitions[security_name] = security_definition
-            operation_security.append({security_name: security_requirement.scopes})
-    return security_definitions, operation_security
 
+            for flow_key, flow_data in flows.items():
+                swagger2_flow_key = oauth2_flows_keys_map.get(flow_key)
+                if not swagger2_flow_key:
+                    logger.warning(f"fastapi_swagger2: Unsupported OAuth2 flow '{flow_key}', skipping")
+                    continue
 
-def get_swagger2_operation_parameters(
-    *,
-    all_route_params: Sequence[ModelField],
-    schema_generator: GenerateJsonSchema,
-    model_name_map: ModelNameMap,
-    field_mapping: FieldMapping,
-) -> List[Dict[str, Any]]:
-    parameters = []
-    for param in all_route_params:
-        field_info = param.field_info
-        field_info = cast(Param, field_info)
-        if not field_info.include_in_schema:
+                mapped_security = _map_oauth2_flow(swagger2_flow_key, flow_data)
+
+                suffixed_name = f"{security_name}_{swagger2_flow_key}"
+                security_definitions[suffixed_name] = mapped_security
+                operation_security.append({suffixed_name: security_requirement.scopes})
+
             continue
-        param_schema = get_schema_from_model_field(
-            field=param,
-            schema_generator=schema_generator,
-            model_name_map=model_name_map,
-            field_mapping=field_mapping,
-        )
-        parameter: Dict[str, Any] = {
-            "name": param.alias,
-            "in": field_info.in_.value,
-            "required": param.required,
-        }
-        schema: Dict[str, Any] = param_schema
-        if field_info.in_.value == "body":
-            if "$ref" in schema:
-                parameter["schema"] = {"$ref", schema["$ref"]}
-            else:
-                parameter["schema"] = schema
-        else:
-            parameter.update({k: v for (k, v) in schema.items() if k != "title"})
-        if field_info.description:
-            parameter["description"] = field_info.description
-        if field_info.example != Undefined:
-            parameter["example"] = jsonable_encoder(field_info.example)
-        if field_info.deprecated:
-            parameter["deprecated"] = field_info.deprecated
-        parameters.append(parameter)
-    return parameters
+        # swagger2 logic - end
 
-
-def get_swagger2_operation_request_body(
-    *,
-    body_field: Optional[ModelField],
-    schema_generator: GenerateJsonSchema,
-    model_name_map: ModelNameMap,
-    field_mapping: FieldMapping,
-) -> Optional[Dict[str, Any]]:
-    if not body_field:
-        return None
-    assert isinstance(body_field, ModelField)
-    body_schema = get_schema_from_model_field(
-        field=body_field,
-        schema_generator=schema_generator,
-        model_name_map=model_name_map,
-        field_mapping=field_mapping,
-    )
-    field_info = cast(Body, body_field.field_info)
-    # request_media_type = field_info.media_type
-    required = body_field.required
-    request_body_oai: Dict[str, Any] = {}
-    request_body_oai["name"] = body_field.alias
-    request_body_oai["in"] = "body"
-    if required:
-        request_body_oai["required"] = required
-
-    request_media_content: Dict[str, Any] = {}
-    if "$ref" in body_schema:
-        request_media_content["schema"] = {"$ref": body_schema["$ref"]}
-        request_media_content.update(
-            {k: v for (k, v) in body_schema.items() if k != "$ref"}
-        )
-    else:
-        request_media_content["schema"] = body_schema
-    if field_info.example != Undefined:
-        request_media_content["example"] = jsonable_encoder(field_info.example)
-    # request_body_oai["content"] = {request_media_type: request_media_content}
-    request_body_oai.update(request_media_content)
-    return request_body_oai
+        security_name = security_requirement.security_scheme.scheme_name
+        security_definitions[security_name] = security_definition
+        operation_security.append({security_name: security_requirement.scopes})
+    return security_definitions, operation_security
 
 
 def get_swagger2_path(
     *,
     route: routing.APIRoute,
     operation_ids: Set[str],
-    schema_generator: GenerateJsonSchema,
     model_name_map: ModelNameMap,
-    field_mapping: FieldMapping,
+    field_mapping: Dict[Tuple[ModelField, Literal["validation", "serialization"]], JsonSchemaValue],
+    separate_input_output_schemas: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     path: Dict[str, Any] = {}
     security_schemes: Dict[str, Any] = {}
@@ -323,62 +274,63 @@ def get_swagger2_path(
         current_response_class: Type[Response] = route.response_class.value
     else:
         current_response_class = route.response_class
-    assert current_response_class, "A response class is needed to generate Swagger"
+    assert current_response_class, "A response class is needed to generate Swagger2"
 
     route_response_media_type: Optional[str] = current_response_class.media_type
+
     if route.include_in_schema:
         for method in route.methods:
-            operation = get_openapi_operation_metadata(
-                route=route, method=method, operation_ids=operation_ids
-            )
+            operation = get_openapi_operation_metadata(route=route, method=method, operation_ids=operation_ids)
 
             parameters: List[Dict[str, Any]] = []
             all_parameters = {}
             flat_dependant = get_flat_dependant(route.dependant, skip_repeats=True)
-            (
-                security_definitions,
-                operation_security,
-            ) = get_swagger2_security_definitions(flat_dependant=flat_dependant)
 
-            if operation_security:
-                operation.setdefault("security", []).extend(operation_security)
+            security_definitions, operation_security = get_swagger2_security_definitions(flat_dependant=flat_dependant)
 
             if security_definitions:
                 security_schemes.update(security_definitions)
 
-            all_route_params = get_flat_params(route.dependant)
-            operation_parameters = get_swagger2_operation_parameters(
-                all_route_params=all_route_params,
-                schema_generator=schema_generator,
+            if operation_security:
+                operation.setdefault("security", []).extend(operation_security)
+
+            operation_parameters = _get_openapi_operation_parameters(
+                dependant=route.dependant,
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
+                separate_input_output_schemas=separate_input_output_schemas,
             )
 
+            operation_parameters = _flatten_parameter_schemas(operation_parameters)
+
             parameters.extend(operation_parameters)
+
             if parameters:
-                all_parameters = {
-                    (param["in"], param["name"]): param for param in parameters
-                }
+                all_parameters = {(param["in"], param["name"]): param for param in parameters}
                 required_parameters = {
-                    (param["in"], param["name"]): param
-                    for param in parameters
-                    if param.get("required")
+                    (param["in"], param["name"]): param for param in parameters if param.get("required")
                 }
                 # Make sure required definitions of the same parameter take precedence
                 # over non-required definitions
                 all_parameters.update(required_parameters)
 
             if method in METHODS_WITH_BODY:
-                request_body_oai = get_swagger2_operation_request_body(
+                request_body_oai = get_openapi_operation_request_body(
                     body_field=route.body_field,
-                    schema_generator=schema_generator,
                     model_name_map=model_name_map,
                     field_mapping=field_mapping,
+                    separate_input_output_schemas=separate_input_output_schemas,
                 )
                 if request_body_oai:
-                    all_parameters.update({("body", "body"): request_body_oai})
+                    if route.body_field:
+                        body_param = _convert_request_body_to_body_param(request_body_oai, route.body_field)
+                    else:
+                        # Use request_body_oai as-is if no body_field (shouldn't normally happen)
+                        body_param = request_body_oai
+                    all_parameters.update({("body", "body"): body_param})
 
-            operation["parameters"] = list(all_parameters.values())
+            if all_parameters:
+                operation["parameters"] = list(all_parameters.values())
 
             if route.callbacks:
                 callbacks = {}
@@ -391,9 +343,9 @@ def get_swagger2_path(
                         ) = get_swagger2_path(
                             route=callback,
                             operation_ids=operation_ids,
-                            schema_generator=schema_generator,
                             model_name_map=model_name_map,
                             field_mapping=field_mapping,
+                            separate_input_output_schemas=separate_input_output_schemas,
                         )
                         callbacks[callback.name] = {callback.path: cb_path}
                 operation["callbacks"] = callbacks
@@ -411,27 +363,24 @@ def get_swagger2_path(
                 if status_code_param is not None:
                     if isinstance(status_code_param.default, int):
                         status_code = str(status_code_param.default)
+
             operation.setdefault("responses", {}).setdefault(status_code, {})[
                 "description"
             ] = route.response_description
 
-            if route_response_media_type and is_body_allowed_for_status_code(
-                route.status_code
-            ):
+            if route_response_media_type and is_body_allowed_for_status_code(route.status_code):
                 response_schema = {"type": "string"}
                 if lenient_issubclass(current_response_class, JSONResponse):
                     if route.response_field:
                         response_schema = get_schema_from_model_field(
                             field=route.response_field,
-                            schema_generator=schema_generator,
                             model_name_map=model_name_map,
                             field_mapping=field_mapping,
+                            separate_input_output_schemas=separate_input_output_schemas,
                         )
                     else:
                         response_schema = {}
-                operation.setdefault("responses", {}).setdefault(status_code, {})[
-                    "schema"
-                ] = response_schema
+                operation.setdefault("responses", {}).setdefault(status_code, {})["schema"] = response_schema
                 operation.setdefault("produces", []).append(route_response_media_type)
 
             if route.responses:
@@ -441,58 +390,53 @@ def get_swagger2_path(
                     additional_response,
                 ) in route.responses.items():
                     process_response = additional_response.copy()
-                    assert isinstance(
-                        process_response, dict
-                    ), "An additional response must be a dict"
                     process_response.pop("model", None)
-
-                    if "headers" in process_response:
-                        headers = process_response["headers"].copy()
-                        for _, info in headers.items():
-                            schema = info.pop("schema", None)
-                            if schema:
-                                info.update(schema)
-                        process_response["headers"] = headers
-
                     status_code_key = str(additional_status_code).upper()
                     if status_code_key == "DEFAULT":
                         status_code_key = "default"
-                    openapi_response = operation_responses.setdefault(
-                        status_code_key, {}
-                    )
+                    swagger2_response = operation_responses.setdefault(status_code_key, {})
+                    assert isinstance(process_response, dict), "An additional response must be a dict"
+
+                    process_response = _flatten_headers_schema(process_response)
+
                     field = route.response_fields.get(additional_status_code)
                     additional_field_schema: Optional[Dict[str, Any]] = None
                     if field:
                         additional_field_schema = get_schema_from_model_field(
                             field=field,
-                            schema_generator=schema_generator,
                             model_name_map=model_name_map,
                             field_mapping=field_mapping,
+                            separate_input_output_schemas=separate_input_output_schemas,
                         )
-                        # media_type = route_response_media_type or "application/json"
+                        media_type = route_response_media_type or "application/json"
                         additional_schema = process_response.setdefault("schema", {})
+                        if media_type not in operation.setdefault("produces", []):
+                            operation["produces"].append(media_type)
                         deep_dict_update(additional_schema, additional_field_schema)
                     status_text: Optional[str] = status_code_ranges.get(
                         str(additional_status_code).upper()
                     ) or http.client.responses.get(int(additional_status_code))
                     description = (
                         process_response.get("description")
-                        or openapi_response.get("description")
+                        or swagger2_response.get("description")
                         or status_text
                         or "Additional Response"
                     )
-                    deep_dict_update(openapi_response, process_response)
-                    openapi_response["description"] = description
+                    deep_dict_update(swagger2_response, process_response)
+                    swagger2_response["description"] = description
 
-            http422 = str(HTTP_422_UNPROCESSABLE_ENTITY)
+            http422 = "422"
+            all_route_params = get_flat_params(route.dependant)
             if (all_route_params or route.body_field) and not any(
-                status in operation["responses"]
-                for status in [http422, "4XX", "default"]
+                status in operation["responses"] for status in [http422, "4XX", "default"]
             ):
                 operation["responses"][http422] = {
                     "description": "Validation Error",
-                    "schema": {"$ref": REF_PREFIX + "HTTPValidationError"},
+                    "schema": {"$ref": "#/definitions/HTTPValidationError"},
                 }
+                media_type = "application/json"
+                if media_type not in operation.setdefault("produces", []):
+                    operation["produces"].append(media_type)
                 if "ValidationError" not in definitions:
                     definitions.update(
                         {
@@ -500,8 +444,10 @@ def get_swagger2_path(
                             "HTTPValidationError": validation_error_response_definition,
                         }
                     )
+
             if route.openapi_extra:
                 deep_dict_update(operation, route.openapi_extra)
+
             path[method.lower()] = operation
 
     return path, security_schemes, definitions
@@ -511,16 +457,22 @@ def get_swagger2(
     *,
     title: str,
     version: str,
-    swagger2_version: str = "2.0",
+    openapi_version: str = "3.1.0",
+    summary: Optional[str] = None,
     description: Optional[str] = None,
     routes: Sequence[BaseRoute],
+    webhooks: Optional[Sequence[BaseRoute]] = None,
     tags: Optional[List[Dict[str, Any]]] = None,
-    server: Optional[str] = None,
+    servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
     terms_of_service: Optional[str] = None,
     contact: Optional[Dict[str, Union[str, Any]]] = None,
     license_info: Optional[Dict[str, Union[str, Any]]] = None,
+    separate_input_output_schemas: bool = True,
+    external_docs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     info: Dict[str, Any] = {"title": title, "version": version}
+    if summary:
+        info["summary"] = summary
     if description:
         info["description"] = description
     if terms_of_service:
@@ -529,145 +481,55 @@ def get_swagger2(
         info["contact"] = contact
     if license_info:
         info["license"] = license_info
-
-    output: Dict[str, Any] = {"swagger": swagger2_version, "info": info}
-
-    if server:
-        pr: ParseResult = urlparse(server)
-        output["host"] = pr.netloc
-        output["basePath"] = pr.path or "/"
-        output.setdefault("schemes", []).append(pr.scheme)
+    output: Dict[str, Any] = {"swagger": openapi_version, "info": info}
+    if servers:
+        output["servers"] = servers
 
     paths: Dict[str, Dict[str, Any]] = {}
+    webhook_paths: Dict[str, Dict[str, Any]] = {}
     operation_ids: Set[str] = set()
 
-    all_fields = get_fields_from_routes(routes)
+    all_fields = get_fields_from_routes(list(routes or []) + list(webhooks or []))
     model_name_map = get_compat_model_name_map(all_fields)
-    schema_generator = GenerateJsonSchema(ref_template=REF_TEMPLATE)
     field_mapping, definitions = get_definitions(
         fields=all_fields,
-        schema_generator=schema_generator,
         model_name_map=model_name_map,
+        separate_input_output_schemas=separate_input_output_schemas,
     )
 
-    for route in routes:
+    for route in routes or []:
         if isinstance(route, routing.APIRoute):
             result = get_swagger2_path(
                 route=route,
                 operation_ids=operation_ids,
-                schema_generator=schema_generator,
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
+                separate_input_output_schemas=separate_input_output_schemas,
             )
             if result:
                 path, security_schemes, path_definitions = result
-
-                for k, v in path.items():
-                    for param in v["parameters"]:
-                        if PYDANTIC_V2:
-                            if "$ref" in param and param.get("in") != "body":
-                                definition = definitions[
-                                    param.pop("$ref").split("/")[2]
-                                ]
-                                param.update(
-                                    {
-                                        k: v
-                                        for (k, v) in definition.items()
-                                        if k != "title"
-                                    }
-                                )
-                        else:
-                            if "allOf" in param:
-                                all_of = param.pop("allOf")
-                                if len(all_of) > 1:
-                                    logger.warning(
-                                        f"fastapi_swagger2: Unable to handle allOf in path params {all_of}, using the first one."
-                                    )
-
-                                if len(all_of) > 0:
-                                    definition = definitions[
-                                        all_of[0]["$ref"].split("/")[2]
-                                    ]
-                                    param.update(
-                                        {
-                                            k: v
-                                            for (k, v) in definition.items()
-                                            if k != "title"
-                                        }
-                                    )
-                            if param.get("in") == "body" and "allOf" in param.get(
-                                "schema", {}
-                            ):
-                                schema = param.pop("schema")
-                                all_of = schema.pop("allOf")
-                                if len(all_of) > 1:
-                                    logger.warning(
-                                        f"fastapi_swagger2: Unable to handle allOf in path params {all_of}, using the first one."
-                                    )
-
-                                if len(all_of) > 0:
-                                    param["schema"] = {"$ref": all_of[0]["$ref"]}
-                                    param.update(
-                                        {
-                                            k: v
-                                            for (k, v) in schema.items()
-                                            if k != "title"
-                                        }
-                                    )
 
                 if path:
                     paths.setdefault(route.path_format, {}).update(path)
 
                 if security_schemes:
-                    output.setdefault("securityDefinitions", {}).update(
-                        security_schemes
-                    )
+                    output.setdefault("securityDefinitions", {}).update(security_schemes)
 
                 if path_definitions:
                     definitions.update(path_definitions)
 
-    output["paths"] = paths
-
     if definitions:
-        # output["definitions"] = {k: definitions[k] for k in sorted(definitions)}
-        output["definitions"] = {}
-        for k in sorted(definitions):
-            properties = definitions[k].get("properties", [])
-            for p in properties:
-                if "anyOf" in properties[p]:
-                    any_of = properties[p].pop("anyOf")
-
-                    if len(any_of) == 1:
-                        # Single item - just use it directly
-                        properties[p].update(any_of[0])
-                    elif len(any_of) == 2:
-                        # Handle the 2-item case (type + null)
-                        ref_item = None
-                        has_null = False
-
-                        for item in any_of:
-                            if item == {"type": "null"}:
-                                has_null = True
-                            elif "$ref" in item:
-                                ref_item = item
-                            else:
-                                properties[p].update(item)
-
-                        if ref_item and has_null:
-                            properties[p]["allOf"] = [ref_item]
-                            properties[p]["x-nullable"] = True
-                        elif has_null:
-                            properties[p]["x-nullable"] = True
-                    else:
-                        # Fallback for complex anyOf cases (len > 2) or empty (len == 0)
-                        properties[p]["type"] = "string"
-                        logger.warning(
-                            f"fastapi_swagger2: Unable to handle anyOf in definitions {any_of}, defaulting to string type."
-                        )
-
-            output["definitions"][k] = definitions[k]
-
+        output["definitions"] = {k: _process_definitions_properties(definitions[k]) for k in sorted(definitions)}
+    output["paths"] = paths
+    if webhook_paths:
+        output["webhooks"] = webhook_paths
     if tags:
         output["tags"] = tags
+    if external_docs:
+        output["externalDocs"] = external_docs
+
+    output = _convert_refs_to_swagger2(output)
+
+    output = _resolve_parameter_refs(output, definitions)
 
     return jsonable_encoder(Swagger2(**output), by_alias=True, exclude_none=True)  # type: ignore
