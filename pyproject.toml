@@ -39,7 +39,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "fastapi >=0.119.0,<=0.123.8",
+    "fastapi >=0.123.9,<=0.127.1",
 ]
 dynamic = ["version"]
 
