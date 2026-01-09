@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
 
 from fastapi import routing
 from fastapi._compat import (
-    JsonSchemaValue,
     ModelField,
     get_compat_model_name_map,
     get_definitions,
@@ -271,7 +270,7 @@ def get_swagger2_path(
     route: routing.APIRoute,
     operation_ids: Set[str],
     model_name_map: ModelNameMap,
-    field_mapping: Dict[Tuple[ModelField, Literal["validation", "serialization"]], JsonSchemaValue],
+    field_mapping: Dict[Tuple[ModelField, Literal["validation", "serialization"]], dict[str, Any]],
     separate_input_output_schemas: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     path: Dict[str, Any] = {}
