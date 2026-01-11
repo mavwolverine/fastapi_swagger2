@@ -1,4 +1,4 @@
-__version__ = "0.3.2"
+from ._version import __version__
 
 from typing import Any, Dict, List, Optional, TypeVar
 

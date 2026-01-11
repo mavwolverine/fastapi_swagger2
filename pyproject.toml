@@ -1,9 +1,10 @@
 [build-system]
-requires = ["hatchling", "flit_core >=3.2,<4"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.9.23,<0.10.0"]
+build-backend = "uv_build"
 
 [project]
 name = "fastapi_swagger2"
+version = "0.3.2"
 description = "Swagger2 support for FastAPI framework"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -41,7 +42,6 @@ classifiers = [
 dependencies = [
     "fastapi >=0.128.0",
 ]
-dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/virajkanwade/fastapi_swagger2"
@@ -57,14 +57,10 @@ test = [
 ]
 dev = [
     "ruff ==0.14.10",
-    "hatch",
 ]
 all = [
     "httpx >=0.28.1",
 ]
-
-[tool.hatch.version]
-path = "src/fastapi_swagger2/__init__.py"
 
 [tool.ruff]
 line-length = 119

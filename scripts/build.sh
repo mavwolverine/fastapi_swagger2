@@ -1,3 +1,3 @@
 #!/bin/sh -e
 
-uv run hatch build --clean
+uv build --clear
