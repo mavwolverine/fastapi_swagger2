@@ -1,3 +1,3 @@
 #!/bin/sh -e
 
-hatchling build
+uv run hatch build --clean

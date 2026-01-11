@@ -41,6 +41,12 @@ $ pip install fastapi_swagger2
 
 </div>
 
+## Development
+
+```console
+$ uv sync --extra dev --extra test --extra all
+```
+
 ## Example
 
 ```Python
@@ -90,5 +96,5 @@ print(yaml.dump(spec))
 ## Development
 
 ```console
-$ pip install "/path/to/fastapi_swagger2/repo[test,all]"
+$ uv sync --extra dev --extra test --extra all
 ```

@@ -1,6 +1,6 @@
 #!/bin/sh -e
 set -x
 
-ruff check src/fastapi_swagger2 tests scripts --fix
-black src/fastapi_swagger2 tests scripts
-isort src/fastapi_swagger2 tests scripts
+uv run ruff check src/fastapi_swagger2 tests scripts --fix
+uv run black src/fastapi_swagger2 tests scripts
+uv run isort src/fastapi_swagger2 tests scripts
