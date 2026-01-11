@@ -53,7 +53,6 @@ test = [
     "coverage[toml] >= 6.0, < 8.0",
     "mypy ==1.19.1",
     "ruff ==0.14.10",
-    "black >= 23.0.0, < 25.0.0",
     "isort >=5.0.0, <7.0.0",
     "httpx >=0.28.1",
 ]
@@ -75,7 +74,7 @@ known_third_party = ["fastapi", "pydantic", "starlette"]
 [tool.mypy]
 strict = true
 
-[tool.black]
+[tool.ruff]
 line-length = 119
 
 [tool.ruff.lint]
@@ -88,7 +87,7 @@ select = [
     "B",  # flake8-bugbear
 ]
 ignore = [
-    "E501",  # line too long, handled by black
+    "E501",  # line too long, handled by ruff format
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
 ]
