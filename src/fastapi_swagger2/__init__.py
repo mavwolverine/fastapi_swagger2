@@ -15,7 +15,7 @@ from typing_extensions import Annotated, Doc, deprecated
 from .utils import get_swagger2
 
 
-# Keep mypy happy with the monkey patching
+# Keep type checker happy with the monkey patching
 class FastAPIEx(FastAPI):
     swagger2_url: Optional[str]
     swagger2_tags: Optional[List[Dict[str, Any]]]
