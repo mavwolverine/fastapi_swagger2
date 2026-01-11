@@ -372,9 +372,9 @@ def get_swagger2_path(
                     if isinstance(status_code_param.default, int):
                         status_code = str(status_code_param.default)
 
-            operation.setdefault("responses", {}).setdefault(status_code, {})[
-                "description"
-            ] = route.response_description
+            operation.setdefault("responses", {}).setdefault(status_code, {})["description"] = (
+                route.response_description
+            )
 
             if route_response_media_type and is_body_allowed_for_status_code(route.status_code):
                 response_schema = {"type": "string"}
