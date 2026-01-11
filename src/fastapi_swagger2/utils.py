@@ -540,4 +540,4 @@ def get_swagger2(
 
     output = _resolve_parameter_refs(output, definitions)
 
-    return jsonable_encoder(Swagger2(**output), by_alias=True, exclude_none=True)  # type: ignore
+    return jsonable_encoder(Swagger2(**output), by_alias=True, exclude_none=True)
