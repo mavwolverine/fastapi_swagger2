@@ -53,7 +53,6 @@ test = [
     "coverage[toml] >= 6.0, < 8.0",
     "mypy ==1.19.1",
     "ruff ==0.14.10",
-    "isort >=5.0.0, <7.0.0",
     "httpx >=0.28.1",
 ]
 dev = [
@@ -67,10 +66,6 @@ all = [
 [tool.hatch.version]
 path = "src/fastapi_swagger2/__init__.py"
 
-[tool.isort]
-profile = "black"
-known_third_party = ["fastapi", "pydantic", "starlette"]
-
 [tool.mypy]
 strict = true
 
@@ -82,7 +77,7 @@ select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
     "F",  # pyflakes
-    # "I",  # isort
+    "I",  # isort
     "C",  # flake8-comprehensions
     "B",  # flake8-bugbear
 ]
@@ -92,4 +87,6 @@ ignore = [
     "C901",  # too complex
 ]
 per-file-ignores = { "__init__.py" = ["F401"] }
-isort = { known-third-party = ["fastapi", "pydantic", "starlette"] }
+
+[tool.ruff.lint.isort]
+known-third-party = ["fastapi", "pydantic", "starlette"]
