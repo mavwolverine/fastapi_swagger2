@@ -2,4 +2,4 @@
 
 set -e
 
-hatch publish
+uv run hatch publish

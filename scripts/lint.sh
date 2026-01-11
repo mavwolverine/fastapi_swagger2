@@ -3,7 +3,7 @@
 set -e
 set -x
 
-mypy src/fastapi_swagger2
-ruff check src/fastapi_swagger2 tests scripts
-black src/fastapi_swagger2 tests --check
-isort src/fastapi_swagger2 tests scripts --check-only
+uv run mypy src/fastapi_swagger2
+uv run ruff check src/fastapi_swagger2 tests scripts
+uv run black src/fastapi_swagger2 tests --check
+uv run isort src/fastapi_swagger2 tests scripts --check-only
