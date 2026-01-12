@@ -1,0 +1,3 @@
+[submodule "tests/integration/petstore"]
+	path = tests/integration/petstore
+	url = https://github.com/mavwolverine/openapi_petstore_fastapi
