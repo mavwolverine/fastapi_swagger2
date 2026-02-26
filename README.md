@@ -29,7 +29,8 @@ Python 3.9+
 * 0.2.7 - FastAPI >= 0.100.0, < 0.119.0 + Pydantic v1/v2
 * 0.3.0 - FastAPI >= 0.119.0, <= 0.123.8 + Pydantic v1/v2
 * 0.3.1 - FastAPI >= 0.123.9, <= 0.127.1 + Pydantic v1/v2 (Since FastAPI 0.126.1, Pydantic v1 is deprecated)
-* 0.3.2 - FastAPI >= 0.128.0
+* 0.3.2 - FastAPI >= 0.128.0, <= 0.128.3
+* 0.3.3 - FastAPI >= 0.128.4, <= 0.128.8 (FastAPI has dropped Python 3.9 support since 0.129.1)
 
 ## Installation
 

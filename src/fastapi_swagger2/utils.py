@@ -5,8 +5,9 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
 from fastapi import routing
 from fastapi._compat import (
     ModelField,
-    get_compat_model_name_map,
     get_definitions,
+    get_flat_models_from_fields,
+    get_model_name_map,
     get_schema_from_model_field,
     lenient_issubclass,
 )
@@ -498,7 +499,8 @@ def get_swagger2(
     operation_ids: Set[str] = set()
 
     all_fields = get_fields_from_routes(list(routes or []) + list(webhooks or []))
-    model_name_map = get_compat_model_name_map(all_fields)
+    flat_models = get_flat_models_from_fields(all_fields, known_models=set())
+    model_name_map = get_model_name_map(flat_models)
     field_mapping, definitions = get_definitions(
         fields=all_fields,
         model_name_map=model_name_map,
