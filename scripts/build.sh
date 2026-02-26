@@ -1,3 +1,3 @@
 #!/bin/sh -e
 
-uv build --clear
+uv build
