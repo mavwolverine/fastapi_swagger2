@@ -3,8 +3,8 @@ import os
 import nox
 
 # Test matrix: Python versions and FastAPI versions
-PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
-FASTAPI_VERSIONS = ["0.128.0", "0.128.4", "latest"]
+PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
+FASTAPI_VERSIONS = ["0.129.0", "latest"]
 
 nox.options.default_venv_backend = "uv"
 
