@@ -1,5 +1,3 @@
-from ._version import __version__
-
 from typing import Any, Dict, List, Optional, TypeVar
 
 from fastapi import FastAPI
@@ -12,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from typing_extensions import Annotated, Doc, deprecated
 
+from ._version import __version__
 from .utils import get_swagger2
 
 
