@@ -1,10 +1,10 @@
-import nox
-import json
 import os
+
+import nox
 
 # Test matrix: Python versions and FastAPI versions
 PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
-FASTAPI_VERSIONS = ["0.128.0", "latest"]
+FASTAPI_VERSIONS = ["0.128.0", "0.128.4", "latest"]
 
 nox.options.default_venv_backend = "uv"
 
@@ -27,7 +27,7 @@ def test(session, fastapi_version):
 
     # Install specific FastAPI version
     if fastapi_version == "latest":
-        session.install("fastapi")
+        session.install("--upgrade", "fastapi")
     else:
         session.install(f"fastapi=={fastapi_version}")
 
@@ -76,4 +76,6 @@ print(f'Generated swagger2.json for Python {sys.version_info.major}.{sys.version
                 session.log("")
                 session.error("❌ Integration test FAILED - JSON differs from reference")
         else:
-            session.error("📝 No reference file found. Run 'python scripts/generate_reference.py' in petstore project first.")
+            session.error(
+                "📝 No reference file found. Run 'python scripts/generate_reference.py' in petstore project first."
+            )
