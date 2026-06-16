@@ -32,6 +32,7 @@ Python 3.9+
 * 0.3.2 - FastAPI >= 0.128.0, <= 0.128.3
 * 0.3.3 - FastAPI >= 0.128.4, <= 0.128.8 (FastAPI has dropped Python 3.9 support since 0.129.1)
 * 0.3.4 - FastAPI >= 0.129.0             (last tested against 0.133.1)
+* 0.3.5 - FastAPI >= 0.129.0, < 0.137.0
 
 ## Installation
 
