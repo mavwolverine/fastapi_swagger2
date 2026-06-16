@@ -1,6 +1,7 @@
 import http.client
 import inspect
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
+from collections.abc import Sequence
+from typing import Any, cast
 
 from fastapi import routing
 from fastapi._compat import (
@@ -21,6 +22,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.logger import logger
 from fastapi.openapi.constants import METHODS_WITH_BODY
 from fastapi.openapi.utils import (
+    _get_api_route_for_openapi,
     _get_openapi_operation_parameters,
     get_fields_from_routes,
     get_openapi_operation_metadata,
@@ -53,7 +55,7 @@ validation_error_definition = {
 }
 
 
-def _process_definitions_properties(definition: Dict[str, Any]) -> Dict[str, Any]:
+def _process_definitions_properties(definition: dict[str, Any]) -> dict[str, Any]:
     properties = definition.get("properties", [])
     for p in properties:
         if "anyOf" not in properties[p]:
@@ -109,7 +111,7 @@ def _convert_refs_to_swagger2(obj: Any) -> Any:
         return obj
 
 
-def _resolve_parameter_refs(output: Dict[str, Any], definitions: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_parameter_refs(output: dict[str, Any], definitions: dict[str, Any]) -> dict[str, Any]:
     """Resolve $ref in parameters by inlining the referenced schema properties"""
     if "paths" in output:
         for path_data in output["paths"].values():
@@ -139,7 +141,7 @@ def _resolve_parameter_refs(output: Dict[str, Any], definitions: Dict[str, Any])
     return output
 
 
-def _map_oauth2_flow(flow_key: str, flow: Dict[str, Any]) -> Dict[str, Any]:
+def _map_oauth2_flow(flow_key: str, flow: dict[str, Any]) -> dict[str, Any]:
     security_definition = {
         "type": "oauth2",
         "flow": flow_key,
@@ -151,7 +153,7 @@ def _map_oauth2_flow(flow_key: str, flow: Dict[str, Any]) -> Dict[str, Any]:
     return security_definition
 
 
-def _flatten_parameter_schemas(parameters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _flatten_parameter_schemas(parameters: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert OpenAPI 3.0 parameter format to Swagger 2.0 format"""
     for param in parameters:
         if "schema" in param and param.get("in") != "body":
@@ -161,7 +163,7 @@ def _flatten_parameter_schemas(parameters: List[Dict[str, Any]]) -> List[Dict[st
     return parameters
 
 
-def _flatten_headers_schema(process_response: Dict[str, Any]) -> Dict[str, Any]:
+def _flatten_headers_schema(process_response: dict[str, Any]) -> dict[str, Any]:
     """Flatten OpenAPI 3.0 header schema to Swagger 2.0 format"""
     if "headers" in process_response:
         for header_info in process_response["headers"].values():
@@ -172,7 +174,7 @@ def _flatten_headers_schema(process_response: Dict[str, Any]) -> Dict[str, Any]:
     return process_response
 
 
-def _convert_request_body_to_body_param(request_body: Dict[str, Any], body_field: ModelField) -> Dict[str, Any]:
+def _convert_request_body_to_body_param(request_body: dict[str, Any], body_field: ModelField) -> dict[str, Any]:
     """Convert OpenAPI 3.0 requestBody to Swagger 2.0 body parameter"""
     # Extract schema from content
     content = request_body["content"]
@@ -200,7 +202,7 @@ def _convert_request_body_to_body_param(request_body: Dict[str, Any], body_field
 
 def get_swagger2_security_definitions(
     flat_dependant: Dependant,
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     oauth2_flows_keys_map = {
         "implicit": "implicit",
         "password": "password",
@@ -210,7 +212,7 @@ def get_swagger2_security_definitions(
 
     security_definitions = {}
     # Use a dict to merge scopes for same security scheme
-    operation_security_dict: Dict[str, List[str]] = {}
+    operation_security_dict: dict[str, list[str]] = {}
     for security_dependency in flat_dependant._security_dependencies:
         security_definition = jsonable_encoder(
             security_dependency._security_scheme.model,
@@ -268,40 +270,40 @@ def get_swagger2_security_definitions(
 
 def get_swagger2_path(
     *,
-    route: routing.APIRoute,
-    operation_ids: Set[str],
+    route: routing._APIRouteLike,
+    operation_ids: set[str],
     model_name_map: ModelNameMap,
-    field_mapping: Dict[Tuple[ModelField, Literal["validation", "serialization"]], dict[str, Any]],
+    field_mapping: dict[tuple[ModelField, Literal["validation", "serialization"]], dict[str, Any]],
     separate_input_output_schemas: bool = True,
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    path: Dict[str, Any] = {}
-    security_schemes: Dict[str, Any] = {}
-    definitions: Dict[str, Any] = {}
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    path: dict[str, Any] = {}
+    security_schemes: dict[str, Any] = {}
+    definitions: dict[str, Any] = {}
     assert route.methods is not None, "Methods must be a list"
 
     if isinstance(route.response_class, DefaultPlaceholder):
-        current_response_class: Type[Response] = route.response_class.value
+        current_response_class: type[Response] = route.response_class.value
     else:
         current_response_class = route.response_class
     assert current_response_class, "A response class is needed to generate Swagger2"
 
-    route_response_media_type: Optional[str] = current_response_class.media_type
+    route_response_media_type: str | None = current_response_class.media_type
 
     if route.include_in_schema:
         for method in route.methods:
             operation = get_openapi_operation_metadata(route=route, method=method, operation_ids=operation_ids)
 
-            parameters: List[Dict[str, Any]] = []
+            parameters: list[dict[str, Any]] = []
             all_parameters = {}
             flat_dependant = get_flat_dependant(route.dependant, skip_repeats=True)
 
             security_definitions, operation_security = get_swagger2_security_definitions(flat_dependant=flat_dependant)
 
-            if security_definitions:
-                security_schemes.update(security_definitions)
-
             if operation_security:
                 operation.setdefault("security", []).extend(operation_security)
+
+            if security_definitions:
+                security_schemes.update(security_definitions)
 
             operation_parameters = _get_openapi_operation_parameters(
                 dependant=route.dependant,
@@ -350,7 +352,7 @@ def get_swagger2_path(
                             cb_security_schemes,
                             cb_definitions,
                         ) = get_swagger2_path(
-                            route=callback,
+                            route=cast(routing._APIRouteLike, callback),
                             operation_ids=operation_ids,
                             model_name_map=model_name_map,
                             field_mapping=field_mapping,
@@ -409,7 +411,7 @@ def get_swagger2_path(
                     process_response = _flatten_headers_schema(process_response)
 
                     field = route.response_fields.get(additional_status_code)
-                    additional_field_schema: Optional[Dict[str, Any]] = None
+                    additional_field_schema: dict[str, Any] | None = None
                     if field:
                         additional_field_schema = get_schema_from_model_field(
                             field=field,
@@ -422,7 +424,7 @@ def get_swagger2_path(
                         if media_type not in operation.setdefault("produces", []):
                             operation["produces"].append(media_type)
                         deep_dict_update(additional_schema, additional_field_schema)
-                    status_text: Optional[str] = status_code_ranges.get(
+                    status_text: str | None = status_code_ranges.get(
                         str(additional_status_code).upper()
                     ) or http.client.responses.get(int(additional_status_code))
                     description = (
@@ -466,20 +468,20 @@ def get_swagger2(
     *,
     title: str,
     version: str,
-    openapi_version: str = "3.1.0",
-    summary: Optional[str] = None,
-    description: Optional[str] = None,
+    swagger2_version: str = "2.0",
+    summary: str | None = None,
+    description: str | None = None,
     routes: Sequence[BaseRoute],
-    webhooks: Optional[Sequence[BaseRoute]] = None,
-    tags: Optional[List[Dict[str, Any]]] = None,
-    servers: Optional[List[Dict[str, Union[str, Any]]]] = None,
-    terms_of_service: Optional[str] = None,
-    contact: Optional[Dict[str, Union[str, Any]]] = None,
-    license_info: Optional[Dict[str, Union[str, Any]]] = None,
+    webhooks: Sequence[BaseRoute] | None = None,
+    tags: list[dict[str, Any]] | None = None,
+    servers: list[dict[str, str | Any]] | None = None,
+    terms_of_service: str | None = None,
+    contact: dict[str, str | Any] | None = None,
+    license_info: dict[str, str | Any] | None = None,
     separate_input_output_schemas: bool = True,
-    external_docs: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    info: Dict[str, Any] = {"title": title, "version": version}
+    external_docs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    info: dict[str, Any] = {"title": title, "version": version}
     if summary:
         info["summary"] = summary
     if description:
@@ -490,15 +492,15 @@ def get_swagger2(
         info["contact"] = contact
     if license_info:
         info["license"] = license_info
-    output: Dict[str, Any] = {"swagger": openapi_version, "info": info}
+    output: dict[str, Any] = {"swagger": swagger2_version, "info": info}
     if servers:
         output["servers"] = servers
 
-    paths: Dict[str, Dict[str, Any]] = {}
-    webhook_paths: Dict[str, Dict[str, Any]] = {}
-    operation_ids: Set[str] = set()
+    paths: dict[str, dict[str, Any]] = {}
+    webhook_paths: dict[str, dict[str, Any]] = {}
+    operation_ids: set[str] = set()
 
-    all_fields = get_fields_from_routes(list(routes or []) + list(webhooks or []))
+    all_fields = get_fields_from_routes(list(routes) + list(webhooks or []))
     flat_models = get_flat_models_from_fields(all_fields, known_models=set())
     model_name_map = get_model_name_map(flat_models)
     field_mapping, definitions = get_definitions(
@@ -507,10 +509,11 @@ def get_swagger2(
         separate_input_output_schemas=separate_input_output_schemas,
     )
 
-    for route in routes or []:
-        if isinstance(route, routing.APIRoute):
+    for route, route_context in routing._iter_routes_with_context(routes):
+        api_route = _get_api_route_for_openapi(route, route_context)
+        if api_route is not None:
             result = get_swagger2_path(
-                route=route,
+                route=api_route,
                 operation_ids=operation_ids,
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
@@ -520,7 +523,7 @@ def get_swagger2(
                 path, security_schemes, path_definitions = result
 
                 if path:
-                    paths.setdefault(route.path_format, {}).update(path)
+                    paths.setdefault(api_route.path_format, {}).update(path)
 
                 if security_schemes:
                     output.setdefault("securityDefinitions", {}).update(security_schemes)

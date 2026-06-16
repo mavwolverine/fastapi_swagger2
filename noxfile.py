@@ -4,7 +4,7 @@ import nox
 
 # Test matrix: Python versions and FastAPI versions
 PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
-FASTAPI_VERSIONS = ["==0.129.0", "<0.137.0"]
+FASTAPI_VERSIONS = ["==0.137.0", "latest"]
 
 nox.options.default_venv_backend = "uv"
 
@@ -28,6 +28,7 @@ def test(session, fastapi_version):
     # Install specific FastAPI version
     if fastapi_version == "latest":
         session.install("--upgrade", "fastapi")
+        session.run("python", "-c", "import fastapi; print(f'FastAPI {fastapi.__version__}')")
     else:
         session.install(f"fastapi{fastapi_version}")
 
