@@ -1,14 +1,15 @@
 [build-system]
-requires = ["uv_build>=0.9.23,<0.10.0"]
+requires = ["uv_build>=0.9.23,<0.12.0"]
 build-backend = "uv_build"
 
 [project]
 name = "fastapi_swagger2"
-version = "0.3.4"
+version = "0.3.5"
 description = "Swagger2 support for FastAPI framework"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file="LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Viraj Kanwade", email = "virajk.oib@gmail.com" },
 ]
@@ -29,7 +30,6 @@ classifiers = [
     "Framework :: Pydantic",
     "Framework :: Pydantic :: 1",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -39,7 +39,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "fastapi >=0.129.0",
+    "fastapi >=0.129.0, <0.137.0",
 ]
 
 [project.urls]
@@ -48,14 +48,14 @@ Documentation = "https://github.com/virajkanwade/fastapi_swagger2"
 
 [project.optional-dependencies]
 test = [
-    "pytest >=7.0.0,<9.0.0",
+    "pytest >=9.0.0",
     "coverage[toml] >= 6.0, < 8.0",
     "ty",
-    "ruff ==0.14.10",
+    "ruff ==0.15.17",
     "httpx >=0.28.1",
 ]
 dev = [
-    "ruff ==0.14.10",
+    "ruff ==0.15.17",
 ]
 all = [
     "httpx >=0.28.1",
