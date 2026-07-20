@@ -471,8 +471,8 @@ def get_swagger2(
     swagger2_version: str = "2.0",
     summary: str | None = None,
     description: str | None = None,
-    routes: Sequence[BaseRoute],
-    webhooks: Sequence[BaseRoute] | None = None,
+    routes: Sequence[BaseRoute | routing.RouteContext],
+    webhooks: Sequence[BaseRoute | routing.RouteContext] | None = None,
     tags: list[dict[str, Any]] | None = None,
     servers: list[dict[str, str | Any]] | None = None,
     terms_of_service: str | None = None,
@@ -509,8 +509,8 @@ def get_swagger2(
         separate_input_output_schemas=separate_input_output_schemas,
     )
 
-    for route, route_context in routing._iter_routes_with_context(routes):
-        api_route = _get_api_route_for_openapi(route, route_context)
+    for route_context in routing.iter_route_contexts(routes):
+        api_route = _get_api_route_for_openapi(route_context)
         if api_route is not None:
             result = get_swagger2_path(
                 route=api_route,
